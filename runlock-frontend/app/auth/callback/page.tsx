@@ -10,30 +10,30 @@ export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 
 function CallbackInner() {
-  const router = useRouter();
-  const sp = useSearchParams();
+    const router = useRouter();
+    const sp = useSearchParams();
 
-  useEffect(() => {
-    const s = sp.get("s");
-    if (!s) { router.replace("/"); return; }
+    useEffect(() => {
+        const s = sp.get("s");
+        if (!s) { router.replace("/"); return; }
 
-    (async () => {
-      // Call Worker finalize to set the Partitioned cookie while top-level = your app
-      await fetch(
-        `${process.env.NEXT_PUBLIC_API_BASE}/api/auth/finalize?s=${encodeURIComponent(s)}`,
-        { credentials: "include" } // must include credentials
-      );
-      router.replace("/");
-    })();
-  }, [router, sp]);
+        (async () => {
+            // Call Worker finalize to set the Partitioned cookie while top-level = your app
+            await fetch(`${process.env.NEXT_PUBLIC_API_BASE}/api/auth/finalize?s=${encodeURIComponent(s)}`, {
+                credentials: "include",
+                cache: "no-store",
+            });
+            router.replace("/");
+        })();
+    }, [router, sp]);
 
-  return null;
+    return null;
 }
 
 export default function CallbackPage() {
-  return (
-    <Suspense fallback={null}>
-      <CallbackInner />
-    </Suspense>
-  );
+    return (
+        <Suspense fallback={null}>
+            <CallbackInner />
+        </Suspense>
+    );
 }

@@ -440,13 +440,21 @@ export default {
 
 
 			// 6) Redirect to frontend with a short-lived signed token (no cookie here)
-			const exp = Math.floor(Date.now() / 1000) + 5 * 60; // 5 minutes
+			// --- OAuth callback success path ---
+			// Build short-lived signed token `s` as we discussed earlier.
+			const exp = Math.floor(Date.now() / 1000) + 5 * 60;
 			const payload = `${userId}.${exp}`;
 			const sig = await hmacSign(payload, env.STRAVA_WEBHOOK_VERIFY_TOKEN);
 			const s = encodeURIComponent(`${payload}.${sig}`);
+
 			return new Response(null, {
 				status: 302,
-				headers: { "Location": `${env.FRONTEND_URL}/auth/callback?s=${s}` }
+				headers: {
+					// Send the user to your NEXT page that calls /api/auth/finalize
+					"Location": `${env.FRONTEND_URL}/auth/callback?s=${s}`,
+					// Prevent any caching weirdness on iOS
+					"Cache-Control": "no-store",
+				},
 			});
 		}
 
@@ -454,9 +462,6 @@ export default {
 			// Clear in the app’s partition via XHR (must include credentials on the client)
 			const headers = new Headers();
 			headers.set("Set-Cookie", "uid=; Path=/; HttpOnly; Secure; SameSite=None; Partitioned; Max-Age=0");
-
-			// Optional: also clear any legacy non-partitioned cookie a user might have:
-			// headers.append("Set-Cookie", "uid=; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=0");
 
 			// Don’t 302 here—return a CORS-able response
 			return withCors(env, request, { status: 204, headers });
@@ -477,13 +482,15 @@ export default {
 			if (!ok) {
 				return withCors(env, request, { status: 400 }, "invalid");
 			}
-			// Set cookie while top-level is your frontend (request comes from your app)
-			return withCors(env, request, {
-				status: 204,
-				headers: { "Set-Cookie": `uid=${userId}; ${cookieAttrsPartitioned()}` }
-			});
-		}
 
+			const headers = new Headers();
+			headers.set("Set-Cookie", `__Host-uid=${userId}; Path=/; HttpOnly; Secure; SameSite=None; Partitioned; Max-Age=31536000`);
+			headers.set("Content-Type", "application/json");
+			headers.set("Cache-Control", "no-store");
+
+			// IMPORTANT: status 200 (not 204). iOS Safari is picky here.
+			return withCors(env, request, { status: 200, headers }, JSON.stringify({ ok: true }));
+		}
 
 		// Which athlete is my current session tied to?
 		if (url.pathname === "/api/whoami" && request.method === "GET") {
@@ -593,8 +600,6 @@ export default {
 				JSON.stringify({ items: results ?? [], limit, offset })
 			);
 		}
-
-
 
 		// Lock funds (demo) — POST { cents: number }
 		if (url.pathname === "/api/pool/lock" && request.method === "POST") {
