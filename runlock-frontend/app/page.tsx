@@ -100,7 +100,7 @@ export default function Page() {
     setErr(null);
     const cents = Math.round(parseFloat(lockAmount || "0") * 100);
     if (!Number.isFinite(cents) || cents <= 0) return setErr("Enter a positive amount.");
-    const res = await apiFetch("/api/pool/lock", {
+    const res = await apiFetch("/api/runlock/pool/lock", {
       method: "POST",
       body: JSON.stringify({ cents }),
     });
@@ -112,7 +112,7 @@ export default function Page() {
     setErr(null);
     const cents = Math.round(parseFloat(emergencyAmount || "0") * 100);
     if (!Number.isFinite(cents) || cents <= 0) return setErr("Enter a positive amount.");
-    const res = await apiFetch("/api/pool/emergency-unlock", {
+    const res = await apiFetch("/api/runlock/pool/emergency-unlock", {
       method: "POST",
       body: JSON.stringify({ cents }),
     });
