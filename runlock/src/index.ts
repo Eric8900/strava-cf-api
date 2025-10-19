@@ -187,27 +187,28 @@ async function deleteSubscription(env: Env, id: number): Promise<void> {
 	if (!r.ok) throw new Error(`Delete sub failed: ${r.status} ${await r.text()}`);
 }
 
-async function verifyStravaSignature(req: Request, clientSecret: string): Promise<{ ok: boolean; raw: string }> {
-	const raw = await req.text(); // raw body as string
+function cookieAttrsPartitioned() {
+	// Cross-site cookie for XHR/fetch: must be None + Secure + Partitioned
+	return "Path=/; HttpOnly; Secure; SameSite=None; Partitioned; Max-Age=31536000";
+}
+
+async function hmacSign(data: string, secret: string) {
 	const enc = new TextEncoder();
 	const key = await crypto.subtle.importKey(
-		"raw",
-		enc.encode(clientSecret),
-		{ name: "HMAC", hash: "SHA-256" },
-		false,
-		["sign", "verify"]
+		"raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
 	);
-	const sigHeader = req.headers.get("X-Strava-Signature") || "";
-	// Strava sends hex digest
-	const signatureBytes = Uint8Array.from(sigHeader.match(/.{1,2}/g)?.map(b => parseInt(b, 16)) ?? []);
-	const mac = await crypto.subtle.sign("HMAC", key, enc.encode(raw));
-	const macBytes = new Uint8Array(mac);
+	const mac = await crypto.subtle.sign("HMAC", key, enc.encode(data));
+	// base64url encode
+	return btoa(String.fromCharCode(...new Uint8Array(mac))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
 
-	// constant-time compare
-	if (signatureBytes.length !== macBytes.length) return { ok: false, raw };
+async function hmacVerify(data: string, sig: string, secret: string) {
+	const expected = await hmacSign(data, secret);
+	// constant-time-ish compare
+	if (expected.length !== sig.length) return false;
 	let diff = 0;
-	for (let i = 0; i < signatureBytes.length; i++) diff |= signatureBytes[i] ^ macBytes[i];
-	return { ok: diff === 0, raw };
+	for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ sig.charCodeAt(i);
+	return diff === 0;
 }
 
 /**
@@ -303,48 +304,47 @@ function dollars(cents: number): string {
 }
 
 function getAllowedOrigins(env: Env): Set<string> {
-  return new Set([
-    "http://localhost:3000",
-    env.FRONTEND_URL, // e.g. https://strava-runlock.vercel.app
-  ]);
+	return new Set([
+		"http://localhost:3000",
+		env.FRONTEND_URL, // e.g. https://strava-runlock.vercel.app
+	]);
 }
 
 function getCorsHeaders(env: Env, req: Request): Headers {
-  const h = new Headers();
-  const origin = req.headers.get("Origin") || "";
-  const allowed = getAllowedOrigins(env);
+	const h = new Headers();
+	const origin = req.headers.get("Origin") || "";
+	const allowed = getAllowedOrigins(env);
 
-  if (allowed.has(origin)) {
-    h.set("Access-Control-Allow-Origin", origin);
-    h.set("Vary", "Origin");
-    h.set("Access-Control-Allow-Credentials", "true");
-  }
-  h.set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
-  h.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  h.set("Access-Control-Max-Age", "86400");
-  return h;
+	if (allowed.has(origin)) {
+		h.set("Access-Control-Allow-Origin", origin);
+		h.set("Vary", "Origin");
+		h.set("Access-Control-Allow-Credentials", "true");
+	}
+	h.set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+	h.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+	h.set("Access-Control-Max-Age", "86400");
+	return h;
 }
 
 function preflight(env: Env, req: Request): Response {
-  const cors = getCorsHeaders(env, req);
-  if (!cors.get("Access-Control-Allow-Origin")) {
-    // Optional: reject unknown origins
-    return new Response("CORS origin not allowed", { status: 403, headers: cors });
-  }
-  const reqHeaders = req.headers.get("Access-Control-Request-Headers") || "Content-Type";
-  cors.set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
-  cors.set("Access-Control-Allow-Headers", reqHeaders);
-  return new Response(null, { status: 204, headers: cors });
+	const cors = getCorsHeaders(env, req);
+	if (!cors.get("Access-Control-Allow-Origin")) {
+		// Optional: reject unknown origins
+		return new Response("CORS origin not allowed", { status: 403, headers: cors });
+	}
+	const reqHeaders = req.headers.get("Access-Control-Request-Headers") || "Content-Type";
+	cors.set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+	cors.set("Access-Control-Allow-Headers", reqHeaders);
+	return new Response(null, { status: 204, headers: cors });
 }
 
 function withCors(env: Env, req: Request, init: ResponseInit = {}, body?: BodyInit | null): Response {
-  const cors = getCorsHeaders(env, req);
-  const headers = new Headers(init.headers || {});
-  // IMPORTANT: iterate Headers properly
-  for (const [k, v] of cors.entries()) headers.set(k, v);
-  return new Response(body ?? (init as any).body ?? null, { ...init, headers });
+	const cors = getCorsHeaders(env, req);
+	const headers = new Headers(init.headers || {});
+	// IMPORTANT: iterate Headers properly
+	for (const [k, v] of cors.entries()) headers.set(k, v);
+	return new Response(body ?? (init as any).body ?? null, { ...init, headers });
 }
-
 
 // ---------- Main Worker ----------
 export default {
@@ -439,24 +439,60 @@ export default {
 			ctx.waitUntil(ensureStravaWebhookSubscription(env));
 
 
-			// 6) Set session cookie and redirect
+			// 6) Redirect to frontend with a short-lived signed token (no cookie here)
+			const exp = Math.floor(Date.now() / 1000) + 5 * 60; // 5 minutes
+			const payload = `${userId}.${exp}`;
+			const sig = await hmacSign(payload, env.STRAVA_WEBHOOK_VERIFY_TOKEN);
+			const s = encodeURIComponent(`${payload}.${sig}`);
 			return new Response(null, {
 				status: 302,
+				headers: { "Location": `${env.FRONTEND_URL}/auth/callback?s=${s}` }
+			});
+		}
+
+		if (url.pathname === "/api/auth/logout") {
+			// Expire the cookie immediately
+			return new Response("Logged out", {
+				status: 302,
 				headers: {
-					"Location": env.FRONTEND_URL,
-					"Set-Cookie": `uid=${userId}; Path=/; HttpOnly; Secure; SameSite=None; Partitioned; Max-Age=31536000`
+					"Location": env.FRONTEND_URL, // or wherever you want to redirect after logout
+					"Set-Cookie": "uid=; Path=/; HttpOnly; Secure; SameSite=None; Partitioned; Max-Age=0"
 				}
 			});
 		}
 
+		// GET /api/auth/finalize?s=<userId.exp.sig>
+		if (url.pathname === "/api/auth/finalize" && request.method === "GET") {
+			const s = url.searchParams.get("s") || "";
+			const [userId, expStr, sig] = s.split(".");
+			const exp = Number(expStr || 0);
+			if (!userId || !exp || !sig) {
+				return withCors(env, request, { status: 400 }, "bad token");
+			}
+			if (Math.floor(Date.now() / 1000) > exp) {
+				return withCors(env, request, { status: 400 }, "expired");
+			}
+			const ok = await hmacVerify(`${userId}.${exp}`, sig, env.STRAVA_WEBHOOK_VERIFY_TOKEN);
+			if (!ok) {
+				return withCors(env, request, { status: 400 }, "invalid");
+			}
+			// Set cookie while top-level is your frontend (request comes from your app)
+			return withCors(env, request, {
+				status: 204,
+				headers: { "Set-Cookie": `uid=${userId}; ${cookieAttrsPartitioned()}` }
+			});
+		}
+
+
 		// Which athlete is my current session tied to?
 		if (url.pathname === "/api/whoami" && request.method === "GET") {
 			const uid = getUidFromCookie(request.headers.get("Cookie"));
+			// /api/whoami success path
 			if (!uid) return withCors(env, request, { status: 401 }, "No session");
 			const row = await env.DB.prepare(
 				"SELECT u.id as user_id, u.strava_athlete_id, mp.cents_locked, mp.emergency_unlocks_used FROM users u LEFT JOIN money_pools mp ON mp.user_id=u.id WHERE u.id = ?"
 			).bind(uid).first<{ user_id: string; strava_athlete_id: number; cents_locked: number; emergency_unlocks_used: number } | null>();
-			return new Response(JSON.stringify(row), { headers: { "Content-Type": "application/json" } });
+			return withCors(env, request, { headers: { "Content-Type": "application/json" } }, JSON.stringify(row));
 		}
 
 
@@ -482,18 +518,6 @@ export default {
 					message: msg
 				}), { status: 502, headers: { "Content-Type": "application/json" } });
 			}
-		}
-
-
-		if (url.pathname === "/api/auth/logout") {
-			// Expire the cookie immediately
-			return new Response("Logged out", {
-				status: 302,
-				headers: {
-					"Location": env.FRONTEND_URL, // or wherever you want to redirect after logout
-					"Set-Cookie": "uid=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0"
-				}
-			});
 		}
 
 		// Webhook verification (GET)
