@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? ""; // fallback allows same-origin dev proxy if you add one later
+const API_BASE = ""; // fallback allows same-origin dev proxy if you add one later
 
 // Small helper to keep fetch calls consistent
 async function apiFetch(path: string, init?: RequestInit) {
