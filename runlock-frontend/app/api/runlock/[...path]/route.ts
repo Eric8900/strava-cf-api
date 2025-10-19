@@ -1,42 +1,79 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE; // e.g. https://api.runlock.app
+// Ensure Node.js runtime (so process.env behaves as expected)
+export const runtime = "nodejs";
+// Avoid any caching on this redirect endpoint
+export const dynamic = "force-dynamic";
 
-function buildTarget(req: NextRequest): string {
-  if (!API_BASE) {
-    throw new Error('Missing NEXT_PUBLIC_API_BASE (e.g. "https://api.runlock.app")');
+function getApiBase(): string | null {
+  // Prefer NEXT_PUBLIC_API_BASE (what you already use in the client)
+  // Fallback to API_BASE if you set a server-only var instead.
+  const a = process.env.NEXT_PUBLIC_API_BASE || process.env.API_BASE || "";
+  try {
+    // Validate it looks like a proper origin
+    if (!a) return null;
+    const u = new URL(a);
+    return u.origin; // strips trailing slashes if any
+  } catch {
+    return null;
   }
+}
 
-  // Example incoming pathname: /api/runlock/payouts or /api/runlock/pool/lock
+function buildTarget(req: NextRequest, apiBase: string): string {
   const pathname = req.nextUrl.pathname;
-
-  // Remove the /api/runlock/ prefix (or /api/runlock) and split the rest
-  const rest = pathname.replace(/^\/api\/runlock\/?/, ""); // "" | "payouts" | "pool/lock" ...
+  // Strip "/api/runlock" prefix (with or without trailing slash)
+  const rest = pathname.replace(/^\/api\/runlock\/?/, "");
   const encoded = rest
     .split("/")
     .filter(Boolean)
-    .map(seg => encodeURIComponent(seg))
-    .join("/"); // safely re-encode path segments
+    .map((seg) => encodeURIComponent(seg))
+    .join("/");
 
+  const base = encoded ? `${apiBase}/api/${encoded}` : `${apiBase}/api`;
   const search = req.nextUrl.search || "";
-
-  // Route 1:1 to the Worker custom domain under /api/...
-  //  - /api/runlock           -> `${API_BASE}/api`
-  //  - /api/runlock/payouts   -> `${API_BASE}/api/payouts`
-  //  - /api/runlock/pool/lock -> `${API_BASE}/api/pool/lock`
-  const base = encoded ? `${API_BASE}/api/${encoded}` : `${API_BASE}/api`;
   return `${base}${search}`;
 }
 
-// 307 so the browser preserves method + body
-function r307(to: string) {
-  return NextResponse.redirect(to, 307);
+function redirect307(to: string) {
+  return NextResponse.redirect(to, 307); // preserves method + body
 }
 
-export function GET(req: NextRequest)     { return r307(buildTarget(req)); }
-export function HEAD(req: NextRequest)    { return r307(buildTarget(req)); }
-export function POST(req: NextRequest)    { return r307(buildTarget(req)); }
-export function PUT(req: NextRequest)     { return r307(buildTarget(req)); }
-export function PATCH(req: NextRequest)   { return r307(buildTarget(req)); }
-export function DELETE(req: NextRequest)  { return r307(buildTarget(req)); }
-export function OPTIONS(req: NextRequest) { return r307(buildTarget(req)); }
+function error500(message: string) {
+  return new NextResponse(message, { status: 500, headers: { "Content-Type": "text/plain" } });
+}
+
+export function GET(req: NextRequest) {
+  const apiBase = getApiBase();
+  if (!apiBase) return error500('Server missing API base. Set NEXT_PUBLIC_API_BASE (e.g. "https://api.runlock.app").');
+  return redirect307(buildTarget(req, apiBase));
+}
+export function HEAD(req: NextRequest) {
+  const apiBase = getApiBase();
+  if (!apiBase) return error500('Server missing API base. Set NEXT_PUBLIC_API_BASE.');
+  return redirect307(buildTarget(req, apiBase));
+}
+export function POST(req: NextRequest) {
+  const apiBase = getApiBase();
+  if (!apiBase) return error500('Server missing API base. Set NEXT_PUBLIC_API_BASE.');
+  return redirect307(buildTarget(req, apiBase));
+}
+export function PUT(req: NextRequest) {
+  const apiBase = getApiBase();
+  if (!apiBase) return error500('Server missing API base. Set NEXT_PUBLIC_API_BASE.');
+  return redirect307(buildTarget(req, apiBase));
+}
+export function PATCH(req: NextRequest) {
+  const apiBase = getApiBase();
+  if (!apiBase) return error500('Server missing API base. Set NEXT_PUBLIC_API_BASE.');
+  return redirect307(buildTarget(req, apiBase));
+}
+export function DELETE(req: NextRequest) {
+  const apiBase = getApiBase();
+  if (!apiBase) return error500('Server missing API base. Set NEXT_PUBLIC_API_BASE.');
+  return redirect307(buildTarget(req, apiBase));
+}
+export function OPTIONS(req: NextRequest) {
+  const apiBase = getApiBase();
+  if (!apiBase) return error500('Server missing API base. Set NEXT_PUBLIC_API_BASE.');
+  return redirect307(buildTarget(req, apiBase));
+}
