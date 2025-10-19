@@ -147,9 +147,25 @@ export default function Page() {
           <Button asChild variant="default">
             <a href={`${API_BASE}/api/auth/strava/start`}>Connect Strava</a>
           </Button>
-          <Button asChild variant="outline">
-            <a href={`${API_BASE}/api/auth/logout`}>Logout</a>
+          <Button
+            variant="outline"
+            onClick={async () => {
+              try {
+                await fetch(`${API_BASE}/api/auth/logout`, {
+                  method: "POST",
+                  credentials: "include", // IMPORTANT
+                });
+              } catch { }
+              // Clear local UI state immediately
+              setMe(null);
+              setPayouts([]);
+              // Then bounce home or reload
+              window.location.href = "/";
+            }}
+          >
+            Logout
           </Button>
+
         </div>
       </header>
 

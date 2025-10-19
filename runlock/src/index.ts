@@ -450,15 +450,16 @@ export default {
 			});
 		}
 
-		if (url.pathname === "/api/auth/logout") {
-			// Expire the cookie immediately
-			return new Response("Logged out", {
-				status: 302,
-				headers: {
-					"Location": env.FRONTEND_URL, // or wherever you want to redirect after logout
-					"Set-Cookie": "uid=; Path=/; HttpOnly; Secure; SameSite=None; Partitioned; Max-Age=0"
-				}
-			});
+		if (url.pathname === "/api/auth/logout" && (request.method === "POST" || request.method === "GET")) {
+			// Clear in the app’s partition via XHR (must include credentials on the client)
+			const headers = new Headers();
+			headers.set("Set-Cookie", "uid=; Path=/; HttpOnly; Secure; SameSite=None; Partitioned; Max-Age=0");
+
+			// Optional: also clear any legacy non-partitioned cookie a user might have:
+			// headers.append("Set-Cookie", "uid=; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=0");
+
+			// Don’t 302 here—return a CORS-able response
+			return withCors(env, request, { status: 204, headers });
 		}
 
 		// GET /api/auth/finalize?s=<userId.exp.sig>
