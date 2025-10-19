@@ -10,22 +10,22 @@ const font = Outfit({
 
 export const metadata: Metadata = {
   title: {
-    default: "My App",
-    template: "%s | App",
+    default: "RunLock",
+    template: "%s | RunLock",
   },
-  description: "The best app ever.",
+  description: "Run for your money.",
   metadataBase: new URL("https://vercel.app"),
   openGraph: {
-    title: "App",
-    description: "The best app ever.",
+    title: "RunLock",
+    description: "Run for your money.",
     url: "https://vercel.app",
-    siteName: "App",
+    siteName: "RunLock",
     images: [
       {
         url: "https://vercel.app",
         width: 1000,
         height: 640,
-        alt: "App",
+        alt: "RunLock",
       },
     ],
     locale: "en_US",
@@ -33,8 +33,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "My App",
-    description: "The best app ever.",
+    title: "RunLock",
+    description: "Run for your money.",
     images: [""],
     creator: "@ericchen890",
   },
