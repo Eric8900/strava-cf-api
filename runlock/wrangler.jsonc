@@ -57,7 +57,7 @@
 	// ========= Environment Variables =========
 	// Use `wrangler secret put` for real secrets in production.
 	"vars": {
-		"APP_BASE_URL": "https://runlock.ericchen890.workers.dev",
+		"APP_BASE_URL": "https://runlock.erch.workers.dev",
 		"STRAVA_CLIENT_ID": "181568",
 		"STRAVA_WEBHOOK_VERIFY_TOKEN": "RANDOMSTRING",
 		"FRONTEND_URL": "https://strava-runlock.vercel.app",
