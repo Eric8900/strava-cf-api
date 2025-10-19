@@ -40,7 +40,7 @@ RunLock provides financial accountability for runners. It works like this:
 ## 🌐 Live Demo
 
 - Frontend: **[strava-runlock.vercel.app](https://strava-runlock.vercel.app)**
-- Backend: **[runlock.ericchen890.workers.dev](https://runlock.ericchen890.workers.dev)**
+- Backend: **[runlock.erch.workers.dev](https://runlock.erch.workers.dev)**
 
 ---
 
