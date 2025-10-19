@@ -536,7 +536,7 @@ export default {
 
 		// Which athlete is my current session tied to?
 		if (url.pathname === "/api/whoami" && request.method === "GET") {
-			const uid = getUserIdFromRequest(request, env);
+			const uid = await getUserIdFromRequest(request, env);
 			// /api/whoami success path
 			if (!uid) return withCors(env, request, { status: 401 }, "No session");
 			const row = await env.DB.prepare(
@@ -620,7 +620,7 @@ export default {
 
 		// List payouts for the current user — GET /api/payouts?limit=50&offset=0
 		if (url.pathname === "/api/payouts" && request.method === "GET") {
-			const uid = getUserIdFromRequest(request, env);
+			const uid = await getUserIdFromRequest(request, env);
 			if (!uid) return withCors(env, request, { status: 401 }, "No session");
 
 			// simple pagination (sane caps)
@@ -635,6 +635,7 @@ export default {
 				.bind(uid, limit, offset)
 				.all<DbPayoutRow>();
 
+
 			return withCors(
 				env,
 				request,
@@ -646,7 +647,7 @@ export default {
 		// Lock funds (demo) — POST { cents: number }
 		if (url.pathname === "/api/pool/lock" && request.method === "POST") {
 			const body = await readJson<LockBody>(request, isLockBody);
-			const uid = getUserIdFromRequest(request, env);
+			const uid = await getUserIdFromRequest(request, env);
 			if (!uid) return withCors(env, request, { status: 401 }, "No session");
 
 			await env.DB.batch([
@@ -663,7 +664,7 @@ export default {
 		// Emergency unlock — POST { cents: number } (enforce <= 3)
 		if (url.pathname === "/api/pool/emergency-unlock" && request.method === "POST") {
 			const body = await readJson<EmergencyUnlockBody>(request, isEmergencyUnlockBody);
-			const uid = getUserIdFromRequest(request, env);
+			const uid = await getUserIdFromRequest(request, env);
 			if (!uid) return withCors(env, request, { status: 401 }, "No session");
 
 			const row = await env.DB
