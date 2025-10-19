@@ -1,79 +1,92 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// Ensure Node.js runtime (so process.env behaves as expected)
 export const runtime = "nodejs";
-// Avoid any caching on this redirect endpoint
 export const dynamic = "force-dynamic";
 
-function getApiBase(): string | null {
-  // Prefer NEXT_PUBLIC_API_BASE (what you already use in the client)
-  // Fallback to API_BASE if you set a server-only var instead.
-  const a = process.env.NEXT_PUBLIC_API_BASE || process.env.API_BASE || "";
-  try {
-    // Validate it looks like a proper origin
-    if (!a) return null;
-    const u = new URL(a);
-    return u.origin; // strips trailing slashes if any
-  } catch {
-    return null;
+const WORKER_BASE = process.env.WORKER_BASE; // e.g. https://runlock.ericchen890.workers.dev OR https://api.runlock.app
+
+function buildUpstreamUrl(req: NextRequest): string {
+  if (!WORKER_BASE) throw new Error("WORKER_BASE not set");
+  const url = new URL(req.nextUrl);
+  const rest = url.pathname.replace(/^\/api\/runlock\/?/, ""); // e.g. me, payouts, pool/lock
+  const base = rest ? `${WORKER_BASE.replace(/\/+$/, "")}/api/${rest}` : `${WORKER_BASE.replace(/\/+$/, "")}/api`;
+  return `${base}${url.search}`;
+}
+
+// Only forward safe headers; set content-type as needed
+function forwardRequestHeaders(req: NextRequest): HeadersInit {
+  const out: Record<string, string> = {};
+  const h = req.headers;
+  // Copy content-type if present
+  const ct = h.get("content-type");
+  if (ct) out["content-type"] = ct;
+  // You can pass through additional headers if you need them.
+  return out;
+}
+
+function passThroughResponseHeaders(h: Headers): HeadersInit {
+  const out: Record<string, string> = {};
+  // whitelist safe headers; do NOT forward set-cookie/content-length/transfer-encoding
+  for (const [k, v] of h.entries()) {
+    const kl = k.toLowerCase();
+    if (kl === "content-type" || kl === "cache-control" || kl === "etag" || kl === "last-modified") {
+      out[k] = v;
+    }
   }
+  return out;
 }
 
-function buildTarget(req: NextRequest, apiBase: string): string {
-  const pathname = req.nextUrl.pathname;
-  // Strip "/api/runlock" prefix (with or without trailing slash)
-  const rest = pathname.replace(/^\/api\/runlock\/?/, "");
-  const encoded = rest
-    .split("/")
-    .filter(Boolean)
-    .map((seg) => encodeURIComponent(seg))
-    .join("/");
+async function proxy(req: NextRequest) {
+  // 1) Build upstream URL
+  let upstreamUrl: string;
+  try {
+    upstreamUrl = buildUpstreamUrl(req);
+  } catch {
+    return new NextResponse("Server missing WORKER_BASE", { status: 500 });
+  }
 
-  const base = encoded ? `${apiBase}/api/${encoded}` : `${apiBase}/api`;
-  const search = req.nextUrl.search || "";
-  return `${base}${search}`;
+  // 2) Read bearer token from a first-party cookie on your app domain
+  const token = req.cookies.get("runlock_token")?.value; // set this in auth/finish route below
+
+  // 3) Build init with method/body/headers
+  const init: RequestInit = {
+    method: req.method,
+    headers: forwardRequestHeaders(req),
+    cache: "no-store",
+  };
+
+  // Add Authorization if present
+  if (token) {
+    (init.headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
+  }
+
+  // Body for methods that can have one
+  if (!["GET", "HEAD"].includes(req.method)) {
+    // Stream or buffer; here we buffer to keep it simple
+    const body = await req.arrayBuffer();
+    init.body = body;
+  }
+
+  // 4) Fetch upstream
+  let upstream: Response;
+  try {
+    upstream = await fetch(upstreamUrl, init);
+  } catch {
+    return new NextResponse("Upstream fetch failed", { status: 502 });
+  }
+
+  // 5) Stream back response with sanitized headers
+  return new NextResponse(upstream.body, {
+    status: upstream.status,
+    headers: passThroughResponseHeaders(upstream.headers),
+  });
 }
 
-function redirect307(to: string) {
-  return NextResponse.redirect(to, 307); // preserves method + body
-}
-
-function error500(message: string) {
-  return new NextResponse(message, { status: 500, headers: { "Content-Type": "text/plain" } });
-}
-
-export function GET(req: NextRequest) {
-  const apiBase = getApiBase();
-  if (!apiBase) return error500('Server missing API base. Set NEXT_PUBLIC_API_BASE (e.g. "https://api.runlock.app").');
-  return redirect307(buildTarget(req, apiBase));
-}
-export function HEAD(req: NextRequest) {
-  const apiBase = getApiBase();
-  if (!apiBase) return error500('Server missing API base. Set NEXT_PUBLIC_API_BASE.');
-  return redirect307(buildTarget(req, apiBase));
-}
-export function POST(req: NextRequest) {
-  const apiBase = getApiBase();
-  if (!apiBase) return error500('Server missing API base. Set NEXT_PUBLIC_API_BASE.');
-  return redirect307(buildTarget(req, apiBase));
-}
-export function PUT(req: NextRequest) {
-  const apiBase = getApiBase();
-  if (!apiBase) return error500('Server missing API base. Set NEXT_PUBLIC_API_BASE.');
-  return redirect307(buildTarget(req, apiBase));
-}
-export function PATCH(req: NextRequest) {
-  const apiBase = getApiBase();
-  if (!apiBase) return error500('Server missing API base. Set NEXT_PUBLIC_API_BASE.');
-  return redirect307(buildTarget(req, apiBase));
-}
-export function DELETE(req: NextRequest) {
-  const apiBase = getApiBase();
-  if (!apiBase) return error500('Server missing API base. Set NEXT_PUBLIC_API_BASE.');
-  return redirect307(buildTarget(req, apiBase));
-}
-export function OPTIONS(req: NextRequest) {
-  const apiBase = getApiBase();
-  if (!apiBase) return error500('Server missing API base. Set NEXT_PUBLIC_API_BASE.');
-  return redirect307(buildTarget(req, apiBase));
-}
+// Bind all methods
+export async function GET(req: NextRequest)     { return proxy(req); }
+export async function HEAD(req: NextRequest)    { return proxy(req); }
+export async function POST(req: NextRequest)    { return proxy(req); }
+export async function PUT(req: NextRequest)     { return proxy(req); }
+export async function PATCH(req: NextRequest)   { return proxy(req); }
+export async function DELETE(req: NextRequest)  { return proxy(req); }
+export async function OPTIONS(req: NextRequest) { return proxy(req); }

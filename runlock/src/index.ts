@@ -248,14 +248,16 @@ function getUidFromCookie(cookie: string | null): string | null {
 	return m ? m[1] : null;
 }
 
-function getUidFromHeaderOrCookie(req: Request): string | null {
-  const auth = req.headers.get("Authorization");
-  if (auth?.startsWith("Bearer ")) {
-    // TODO: verify a real signed JWT; for a quick test you can accept a raw uid
-    const maybeUid = auth.slice(7).trim();
-    if (/^[a-z0-9-]{10,}$/.test(maybeUid)) return maybeUid;
-  }
-  return getUidFromCookie(req.headers.get("Cookie"));
+async function getUidFromHeaderOrCookie(env: Env, req: Request): Promise<string | null> {
+	const auth = req.headers.get("Authorization") || "";
+	if (auth.startsWith("Bearer ")) {
+		const token = auth.slice(7).trim();
+		if (!token) return null;
+		// Look up token -> user_id; use KV for simplicity
+		const uid = await env.FLAGS.get(`api_token:${token}`);
+		if (uid) return uid;
+	}
+	return getUidFromCookie(req.headers.get("Cookie"));
 }
 
 async function readJson<T>(
@@ -470,18 +472,33 @@ export default {
 
 
 			// 6) Set session cookie and redirect
+			// return new Response(null, {
+			// 	status: 302,
+			// 	headers: {
+			// 		"Location": env.FRONTEND_URL,
+			// 		"Set-Cookie": `uid=${userId}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=31536000`
+			// 	}
+			// });
+			// After you’ve computed userId
+			const token = crypto.randomUUID();
+			await env.FLAGS.put(`api_token:${token}`, userId, { expirationTtl: 60 * 60 * 24 * 30 }); // 30 days
+
+			// Redirect to a Next.js route that will set a first-party cookie on your app domain
 			return new Response(null, {
 				status: 302,
 				headers: {
-					"Location": env.FRONTEND_URL,
+					// IMPORTANT: this should be a route on YOUR app domain, not workers.dev
+					"Location": `${env.FRONTEND_URL.replace(/\/$/, "")}/api/runlock/auth/finish?token=${encodeURIComponent(token)}`,
+					// You can still set the uid cookie for same-site cases; it won’t help the proxy, but harmless
 					"Set-Cookie": `uid=${userId}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=31536000`
 				}
 			});
+
 		}
 
 		// Which athlete is my current session tied to?
 		if (url.pathname === "/api/whoami" && request.method === "GET") {
-			const uid = getUidFromHeaderOrCookie(request);
+			const uid = getUidFromHeaderOrCookie(env, request);
 			if (!uid) return withCors(env, request, { status: 401 }, "No session");
 			const row = await env.DB.prepare(
 				"SELECT u.id as user_id, u.strava_athlete_id, mp.cents_locked, mp.emergency_unlocks_used FROM users u LEFT JOIN money_pools mp ON mp.user_id=u.id WHERE u.id = ?"
@@ -514,15 +531,14 @@ export default {
 			}
 		}
 
-
 		if (url.pathname === "/api/auth/logout") {
-			// Expire the cookie immediately
+			// Expire the Worker cookie
 			return new Response("Logged out", {
 				status: 302,
 				headers: {
-					"Location": env.FRONTEND_URL, // or wherever you want to redirect after logout
+					"Location": env.FRONTEND_URL, // redirect to your app
 					"Set-Cookie": "uid=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0"
-				}
+				},
 			});
 		}
 
@@ -578,7 +594,7 @@ export default {
 
 		// List payouts for the current user — GET /api/payouts?limit=50&offset=0
 		if (url.pathname === "/api/payouts" && request.method === "GET") {
-			const uid = getUidFromHeaderOrCookie(request);
+			const uid = getUidFromHeaderOrCookie(env, request);
 			if (!uid) return withCors(env, request, { status: 401 }, "No session");
 
 			// simple pagination (sane caps)
@@ -606,7 +622,7 @@ export default {
 		// Lock funds (demo) — POST { cents: number }
 		if (url.pathname === "/api/pool/lock" && request.method === "POST") {
 			const body = await readJson<LockBody>(request, isLockBody);
-			const uid = getUidFromHeaderOrCookie(request);
+			const uid = getUidFromHeaderOrCookie(env, request);
 			if (!uid) return withCors(env, request, { status: 401 }, "No session");
 
 			await env.DB.batch([
@@ -623,7 +639,7 @@ export default {
 		// Emergency unlock — POST { cents: number } (enforce <= 3)
 		if (url.pathname === "/api/pool/emergency-unlock" && request.method === "POST") {
 			const body = await readJson<EmergencyUnlockBody>(request, isEmergencyUnlockBody);
-			const uid = getUidFromHeaderOrCookie(request);
+			const uid = getUidFromHeaderOrCookie(env, request);
 			if (!uid) return withCors(env, request, { status: 401 }, "No session");
 
 			const row = await env.DB
@@ -653,7 +669,7 @@ export default {
 
 		// In your fetch handler:
 		if (url.pathname === "/api/me" && request.method === "GET") {
-			const uid = getUidFromHeaderOrCookie(request);
+			const uid = getUidFromHeaderOrCookie(env, request);
 			if (!uid) return withCors(env, request, { status: 401 }, "No session");
 
 			const row = await env.DB.prepare(
