@@ -248,16 +248,6 @@ function getUidFromCookie(cookie: string | null): string | null {
 	return m ? m[1] : null;
 }
 
-function getUidFromHeaderOrCookie(req: Request): string | null {
-  const auth = req.headers.get("Authorization");
-  if (auth?.startsWith("Bearer ")) {
-    // TODO: verify a real signed JWT; for a quick test you can accept a raw uid
-    const maybeUid = auth.slice(7).trim();
-    if (/^[a-z0-9-]{10,}$/.test(maybeUid)) return maybeUid;
-  }
-  return getUidFromCookie(req.headers.get("Cookie"));
-}
-
 async function readJson<T>(
 	req: Request,
 	validate: (u: unknown) => u is T
@@ -312,11 +302,6 @@ function dollars(cents: number): string {
 	return (cents / 100).toFixed(2);
 }
 
-function normalizeOrigin(s?: string | null): string {
-	if (!s) return "";
-	try { return new URL(s).origin; } catch { return ""; }
-}
-
 function getAllowedOrigins(env: Env): Set<string> {
   return new Set([
     "http://localhost:3000",
@@ -365,13 +350,10 @@ function withCors(env: Env, req: Request, init: ResponseInit = {}, body?: BodyIn
 export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		const url = new URL(request.url);
-		console.log("Origin:", request.headers.get("Origin"),
-			"Allowed:", Array.from(getAllowedOrigins(env)));
-		console.log("Cookie header:", request.headers.get("Cookie"));
 
 		// Handle CORS preflight first
 		if (request.method === "OPTIONS") {
-			return preflight(request);
+			return preflight(env, request);
 		}
 
 		// Start OAuth with Strava
@@ -469,8 +451,8 @@ export default {
 
 		// Which athlete is my current session tied to?
 		if (url.pathname === "/api/whoami" && request.method === "GET") {
-			const uid = getUidFromHeaderOrCookie(request);
-			if (!uid) return withCors(env, request, { status: 401 }, "No session");
+			const uid = getUidFromCookie(request.headers.get("Cookie"));
+			if (!uid) return new Response("No session", { status: 401 });
 			const row = await env.DB.prepare(
 				"SELECT u.id as user_id, u.strava_athlete_id, mp.cents_locked, mp.emergency_unlocks_used FROM users u LEFT JOIN money_pools mp ON mp.user_id=u.id WHERE u.id = ?"
 			).bind(uid).first<{ user_id: string; strava_athlete_id: number; cents_locked: number; emergency_unlocks_used: number } | null>();
@@ -533,10 +515,10 @@ export default {
 				const raw = await request.text();
 				const evtUnknown = JSON.parse(raw) as unknown;
 
-				// console.log("[webhook] raw:", raw);
+				console.log("[webhook] raw:", raw);
 
 				if (isStravaEvent(evtUnknown)) {
-					// console.log("[webhook] parsed:", evtUnknown);
+					console.log("[webhook] parsed:", evtUnknown);
 
 					if (evtUnknown.object_type === "activity" &&
 						(evtUnknown.aspect_type === "create" || evtUnknown.aspect_type === "update")) {
@@ -544,7 +526,7 @@ export default {
 							"SELECT id FROM users WHERE strava_athlete_id = ?"
 						).bind(evtUnknown.owner_id).first<{ id: string } | null>();
 
-						// console.log("[webhook] owner_id:", evtUnknown.owner_id, "user:", u?.id ?? null);
+						console.log("[webhook] owner_id:", evtUnknown.owner_id, "user:", u?.id ?? null);
 
 						if (u?.id) {
 							ctx.waitUntil(processActivity(env, u.id, String(evtUnknown.object_id)));
@@ -566,8 +548,8 @@ export default {
 
 		// List payouts for the current user — GET /api/payouts?limit=50&offset=0
 		if (url.pathname === "/api/payouts" && request.method === "GET") {
-			const uid = getUidFromHeaderOrCookie(request);
-			if (!uid) return withCors(env, request, { status: 401 }, "No session");
+			const uid = getUidFromCookie(request.headers.get("Cookie"));
+			if (!uid) return new Response("No session", { status: 401 });
 
 			// simple pagination (sane caps)
 			const limit = toPosInt(url.searchParams.get("limit"), 50, 200);
@@ -582,6 +564,7 @@ export default {
 				.all<DbPayoutRow>();
 
 			return withCors(
+				env,
 				request,
 				{ headers: { "Content-Type": "application/json" } },
 				JSON.stringify({ items: results ?? [], limit, offset })
@@ -593,8 +576,8 @@ export default {
 		// Lock funds (demo) — POST { cents: number }
 		if (url.pathname === "/api/pool/lock" && request.method === "POST") {
 			const body = await readJson<LockBody>(request, isLockBody);
-			const uid = getUidFromHeaderOrCookie(request);
-			if (!uid) return withCors(env, request, { status: 401 }, "No session");
+			const uid = getUidFromCookie(request.headers.get("Cookie"));
+			if (!uid) return new Response("No session", { status: 401 });
 
 			await env.DB.batch([
 				env.DB.prepare(
@@ -604,14 +587,14 @@ export default {
 					"INSERT INTO pool_transactions (id,user_id,type,cents) VALUES (?,?,?,?)"
 				).bind(crypto.randomUUID(), uid, "LOCK", body.cents)
 			]);
-			return withCors(request, { status: 200 }, `locked $${dollars(body.cents)}`);
+			return withCors(env, request, { status: 200 }, `locked $${dollars(body.cents)}`);
 		}
 
 		// Emergency unlock — POST { cents: number } (enforce <= 3)
 		if (url.pathname === "/api/pool/emergency-unlock" && request.method === "POST") {
 			const body = await readJson<EmergencyUnlockBody>(request, isEmergencyUnlockBody);
-			const uid = getUidFromHeaderOrCookie(request);
-			if (!uid) return withCors(env, request, { status: 401 }, "No session");
+			const uid = getUidFromCookie(request.headers.get("Cookie"));
+			if (!uid) return new Response("No session", { status: 401 });
 
 			const row = await env.DB
 				.prepare(
@@ -635,24 +618,24 @@ export default {
 				).bind(crypto.randomUUID(), uid, "EMERGENCY_UNLOCK", body.cents)
 			]);
 
-			return withCors(request, { status: 200 }, `unlocked $${dollars(body.cents)}`);
+			return withCors(env, request, { status: 200 }, `unlocked $${dollars(body.cents)}`);
 		}
 
 		// In your fetch handler:
 		if (url.pathname === "/api/me" && request.method === "GET") {
-			const uid = getUidFromHeaderOrCookie(request);
-			if (!uid) return withCors(env, request, { status: 401 }, "No session");
+			const uid = getUidFromCookie(request.headers.get("Cookie"));
+			if (!uid) return new Response("No session", { status: 401 });
 
 			const row = await env.DB.prepare(
 				"SELECT cents_locked, emergency_unlocks_used FROM money_pools WHERE user_id = ?"
 			).bind(uid).first<{ cents_locked: number; emergency_unlocks_used: number } | null>();
 
-			return withCors(request, {
+			return withCors(env, request, {
 				headers: { "Content-Type": "application/json" }
 			}, JSON.stringify(row ?? { cents_locked: 0, emergency_unlocks_used: 0 }));
 		}
 
-		return withCors(request, { status: 404 }, "Not found");
+		return withCors(env, request, { status: 404 }, "Not found");
 	},
 	async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
 		ctx.waitUntil(ensureStravaWebhookSubscription(env));

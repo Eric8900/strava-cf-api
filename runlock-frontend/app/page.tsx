@@ -7,13 +7,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 
-const API_BASE = ""; 
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? ""; // fallback allows same-origin dev proxy if you add one later
 
+// Small helper to keep fetch calls consistent
 async function apiFetch(path: string, init?: RequestInit) {
   const url = `${API_BASE}${path}`;
   const res = await fetch(url, {
-    credentials: "include",             // send cookies to api.runlock.app
-    cache: "no-store",
+    // Required so the browser sends/receives cookies across origins
+    credentials: "include",
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -24,7 +25,11 @@ async function apiFetch(path: string, init?: RequestInit) {
 }
 
 // ---------- Types ----------
-export type Me = { cents_locked: number; emergency_unlocks_used: number };
+export type Me = {
+  cents_locked: number;
+  emergency_unlocks_used: number;
+};
+
 type Payout = { id: string; activity_id: string; cents: number };
 
 const USD = (cents: number) => `$${(cents / 100).toFixed(2)}`;
@@ -34,10 +39,12 @@ export default function Page() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
+  // amounts to lock/unlock (in dollars, converted to cents)
   const [lockAmount, setLockAmount] = useState("10");
   const [emergencyAmount, setEmergencyAmount] = useState("10");
 
-  const PAGE_SIZE = 100;
+  // payouts state
+  const PAGE_SIZE = 10;
   const [payouts, setPayouts] = useState<Payout[]>([]);
   const [payoutLoading, setPayoutLoading] = useState(false);
   const [payoutErr, setPayoutErr] = useState<string | null>(null);
@@ -52,19 +59,20 @@ export default function Page() {
     setLoading(true);
     setErr(null);
     try {
-      const res = await apiFetch("/api/runlock/me");
+      const res = await apiFetch("/api/me", { cache: "no-store" });
       if (res.status === 401) throw new Error("Not signed in. Connect Strava first.");
       if (!res.ok) throw new Error(await res.text());
       const data = (await res.json()) as Me;
       setMe(data);
     } catch (e: unknown) {
-      if (e instanceof Error) setErr(e.message || "Failed to load");
+      if (e instanceof Error) setErr(e?.message ?? "Failed to load");
       setMe(null);
     } finally {
       setLoading(false);
     }
   }, []);
 
+  // payouts loader
   const loadPayouts = useCallback(
     async (opts?: { append?: boolean }) => {
       const append = !!opts?.append;
@@ -72,7 +80,9 @@ export default function Page() {
       setPayoutErr(null);
       try {
         const offset = append ? payoutOffset : 0;
-        const res = await apiFetch(`/api/runlock/payouts?limit=${PAGE_SIZE}&offset=${offset}`);
+        const res = await apiFetch(`/api/payouts?limit=${PAGE_SIZE}&offset=${offset}`, {
+          cache: "no-store",
+        });
         if (res.status === 401) throw new Error("Not signed in. Connect Strava first.");
         if (!res.ok) throw new Error(await res.text());
         const data = (await res.json()) as {
@@ -83,7 +93,7 @@ export default function Page() {
         setPayouts((prev) => (append ? [...prev, ...data.items] : data.items));
         setPayoutOffset(offset + data.items.length);
       } catch (e: unknown) {
-        if (e instanceof Error) setPayoutErr(e.message || "Failed to load payouts");
+        if (e instanceof Error) setPayoutErr(e?.message ?? "Failed to load payouts");
       } finally {
         setPayoutLoading(false);
       }
@@ -100,19 +110,21 @@ export default function Page() {
     setErr(null);
     const cents = Math.round(parseFloat(lockAmount || "0") * 100);
     if (!Number.isFinite(cents) || cents <= 0) return setErr("Enter a positive amount.");
-    const res = await apiFetch("/api/runlock/pool/lock", {
+    const res = await apiFetch("/api/pool/lock", {
       method: "POST",
       body: JSON.stringify({ cents }),
     });
     if (!res.ok) return setErr(await res.text());
     await refreshMe();
+    // optional: refresh payouts (in case something changed)
+    // await loadPayouts({ append: false });
   }
 
   async function emergencyUnlock() {
     setErr(null);
     const cents = Math.round(parseFloat(emergencyAmount || "0") * 100);
     if (!Number.isFinite(cents) || cents <= 0) return setErr("Enter a positive amount.");
-    const res = await apiFetch("/api/runlock/pool/emergency-unlock", {
+    const res = await apiFetch("/api/pool/emergency-unlock", {
       method: "POST",
       body: JSON.stringify({ cents }),
     });
@@ -127,10 +139,10 @@ export default function Page() {
         <div className="flex gap-2">
           {/* IMPORTANT: go directly to backend for OAuth start */}
           <Button asChild variant="default">
-            <a href={`/api/runlock/auth/strava/start`}>Connect Strava</a>
+            <a href={`${API_BASE}/api/auth/strava/start`}>Connect Strava</a>
           </Button>
           <Button asChild variant="outline">
-            <a href={`/api/runlock/auth/logout`}>Logout</a>
+            <a href={`${API_BASE}/api/auth/logout`}>Logout</a>
           </Button>
         </div>
       </header>
