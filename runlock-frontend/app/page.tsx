@@ -7,7 +7,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 
-const API_BASE = ""; // fallback allows same-origin dev proxy if you add one later
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE as string;
+
+if (!API_BASE || !API_BASE.startsWith("http")) {
+  // Optional: throw during render in dev, or show a visible error banner
+  console.error("NEXT_PUBLIC_API_BASE is not set to a full URL");
+  throw new Error("Misconfigured: NEXT_PUBLIC_API_BASE missing");
+}
 
 // Small helper to keep fetch calls consistent
 async function apiFetch(path: string, init?: RequestInit) {
