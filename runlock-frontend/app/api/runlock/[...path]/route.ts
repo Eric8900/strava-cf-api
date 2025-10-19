@@ -1,85 +1,42 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE; // e.g., https://api.runlock.app
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE; // e.g. https://api.runlock.app
 
-type ParamsShape = { path?: string[] | string };
-
-// robustly coerce to string[]
-function toSegments(p: ParamsShape["path"]): string[] {
-  if (Array.isArray(p)) return p;
-  if (typeof p === "string") return [p];
-  return [];
-}
-
-// build target URL (handles empty segments and preserves ?query)
-function buildTarget(req: NextRequest, segs: string[]): string {
+function buildTarget(req: NextRequest): string {
   if (!API_BASE) {
     throw new Error('Missing NEXT_PUBLIC_API_BASE (e.g. "https://api.runlock.app")');
   }
-  const encoded = segs.map(encodeURIComponent).join("/");
-  const base = encoded ? `${API_BASE}/api/${encoded}` : `${API_BASE}/api`;
+
+  // Example incoming pathname: /api/runlock/payouts or /api/runlock/pool/lock
+  const pathname = req.nextUrl.pathname;
+
+  // Remove the /api/runlock/ prefix (or /api/runlock) and split the rest
+  const rest = pathname.replace(/^\/api\/runlock\/?/, ""); // "" | "payouts" | "pool/lock" ...
+  const encoded = rest
+    .split("/")
+    .filter(Boolean)
+    .map(seg => encodeURIComponent(seg))
+    .join("/"); // safely re-encode path segments
+
   const search = req.nextUrl.search || "";
+
+  // Route 1:1 to the Worker custom domain under /api/...
+  //  - /api/runlock           -> `${API_BASE}/api`
+  //  - /api/runlock/payouts   -> `${API_BASE}/api/payouts`
+  //  - /api/runlock/pool/lock -> `${API_BASE}/api/pool/lock`
+  const base = encoded ? `${API_BASE}/api/${encoded}` : `${API_BASE}/api`;
   return `${base}${search}`;
 }
 
-// 307 so the browser preserves method + body on redirect
+// 307 so the browser preserves method + body
 function r307(to: string) {
   return NextResponse.redirect(to, 307);
 }
 
-// --- Handlers (params may be a Promise) ---
-export async function GET(
-  req: NextRequest,
-  ctx: { params: Promise<ParamsShape> } | { params: ParamsShape }
-) {
-  const params = "then" in ctx.params ? await ctx.params : ctx.params;
-  return r307(buildTarget(req, toSegments(params.path)));
-}
-
-export async function HEAD(
-  req: NextRequest,
-  ctx: { params: Promise<ParamsShape> } | { params: ParamsShape }
-) {
-  const params = "then" in ctx.params ? await ctx.params : ctx.params;
-  return r307(buildTarget(req, toSegments(params.path)));
-}
-
-export async function POST(
-  req: NextRequest,
-  ctx: { params: Promise<ParamsShape> } | { params: ParamsShape }
-) {
-  const params = "then" in ctx.params ? await ctx.params : ctx.params;
-  return r307(buildTarget(req, toSegments(params.path)));
-}
-
-export async function PUT(
-  req: NextRequest,
-  ctx: { params: Promise<ParamsShape> } | { params: ParamsShape }
-) {
-  const params = "then" in ctx.params ? await ctx.params : ctx.params;
-  return r307(buildTarget(req, toSegments(params.path)));
-}
-
-export async function PATCH(
-  req: NextRequest,
-  ctx: { params: Promise<ParamsShape> } | { params: ParamsShape }
-) {
-  const params = "then" in ctx.params ? await ctx.params : ctx.params;
-  return r307(buildTarget(req, toSegments(params.path)));
-}
-
-export async function DELETE(
-  req: NextRequest,
-  ctx: { params: Promise<ParamsShape> } | { params: ParamsShape }
-) {
-  const params = "then" in ctx.params ? await ctx.params : ctx.params;
-  return r307(buildTarget(req, toSegments(params.path)));
-}
-
-export async function OPTIONS(
-  req: NextRequest,
-  ctx: { params: Promise<ParamsShape> } | { params: ParamsShape }
-) {
-  const params = "then" in ctx.params ? await ctx.params : ctx.params;
-  return r307(buildTarget(req, toSegments(params.path)));
-}
+export function GET(req: NextRequest)     { return r307(buildTarget(req)); }
+export function HEAD(req: NextRequest)    { return r307(buildTarget(req)); }
+export function POST(req: NextRequest)    { return r307(buildTarget(req)); }
+export function PUT(req: NextRequest)     { return r307(buildTarget(req)); }
+export function PATCH(req: NextRequest)   { return r307(buildTarget(req)); }
+export function DELETE(req: NextRequest)  { return r307(buildTarget(req)); }
+export function OPTIONS(req: NextRequest) { return r307(buildTarget(req)); }
