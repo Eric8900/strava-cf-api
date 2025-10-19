@@ -9,9 +9,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 
-// If you previously had themeColor in metadata, move it here or to layout:
-export const viewport = { themeColor: "#ffffff" };
-
 function CallbackInner() {
   const router = useRouter();
   const sp = useSearchParams();
