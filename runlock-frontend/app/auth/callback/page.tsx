@@ -19,10 +19,14 @@ function CallbackInner() {
 
         (async () => {
             // Call Worker finalize to set the Partitioned cookie while top-level = your app
-            await fetch(`${process.env.NEXT_PUBLIC_API_BASE}/api/auth/finalize?s=${encodeURIComponent(s)}`, {
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE}/api/auth/finalize?s=${encodeURIComponent(s)}`, {
                 credentials: "include",
                 cache: "no-store",
             });
+            try {
+                const js = await res.json();
+                if (js?.token) sessionStorage.setItem("runlock_token", js.token);
+            } catch { }
             router.replace("/");
         })();
     }, [router, sp]);

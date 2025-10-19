@@ -18,14 +18,19 @@ if (!API_BASE || !API_BASE.startsWith("http")) {
 // Small helper to keep fetch calls consistent
 async function apiFetch(path: string, init?: RequestInit) {
   const url = `${API_BASE}${path}`;
+  const token = typeof window !== "undefined" ? sessionStorage.getItem("runlock_token") : null;
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(init?.headers as Record<string, string> | undefined),
+  };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
   const res = await fetch(url, {
-    // Required so the browser sends/receives cookies across origins
-    credentials: "include",
+    credentials: "include",        // still send cookie for non-Safari
+    cache: "no-store",
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers || {}),
-    },
+    headers,
   });
   return res;
 }
@@ -151,21 +156,17 @@ export default function Page() {
             variant="outline"
             onClick={async () => {
               try {
-                await fetch(`${API_BASE}/api/auth/logout`, {
-                  method: "POST",
-                  credentials: "include", // IMPORTANT
-                });
+                await fetch(`${API_BASE}/api/auth/logout`, { method: "POST", credentials: "include" });
               } catch { }
-              // Clear local UI state immediately
+              sessionStorage.removeItem("runlock_token"); // drop bearer
+              // local UI reset
               setMe(null);
               setPayouts([]);
-              // Then bounce home or reload
               window.location.href = "/";
             }}
           >
             Logout
           </Button>
-
         </div>
       </header>
 

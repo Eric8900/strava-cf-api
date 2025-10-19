@@ -211,6 +211,37 @@ async function hmacVerify(data: string, sig: string, secret: string) {
 	return diff === 0;
 }
 
+// Session token = base64url(`${userId}.${exp}.${sig}`)
+function b64url(u8: Uint8Array) {
+	return btoa(String.fromCharCode(...u8)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function b64urlDecode(s: string): string {
+	s = s.replace(/-/g, "+").replace(/_/g, "/");
+	const pad = s.length % 4 ? 4 - (s.length % 4) : 0;
+	s += "=".repeat(pad);
+	return atob(s);
+}
+
+async function makeSessionToken(userId: string, secret: string, ttlSec = 60 * 60 * 24 * 7) { // 7 days
+	const exp = Math.floor(Date.now() / 1000) + ttlSec;
+	const payload = `${userId}.${exp}`;
+	const sig = await hmacSign(payload, secret);
+	return `${b64url(new TextEncoder().encode(userId))}.${b64url(new TextEncoder().encode(String(exp)))}.${sig}`;
+}
+
+async function parseAndVerifySessionToken(token: string, secret: string): Promise<{ userId: string } | null> {
+	const parts = token.split(".");
+	if (parts.length !== 3) return null;
+	const userId = b64urlDecode(parts[0]);
+	const expStr = b64urlDecode(parts[1]);
+	const sig = parts[2];
+	const exp = Number(expStr);
+	if (!userId || !Number.isFinite(exp)) return null;
+	if (Math.floor(Date.now() / 1000) > exp) return null;
+	const ok = await hmacVerify(`${userId}.${exp}`, sig, secret);
+	return ok ? { userId } : null;
+}
+
 /**
  * Ensure exactly one subscription exists for our callback_url.
  * Stores the chosen subscription id in KV to avoid repeating work.
@@ -244,9 +275,20 @@ async function ensureStravaWebhookSubscription(env: Env): Promise<void> {
 	}
 }
 
-function getUidFromCookie(cookie: string | null): string | null {
-	const m = cookie?.match(/uid=([a-z0-9-]+)/i);
-	return m ? m[1] : null;
+async function getUserIdFromRequest(req: Request, env: Env): Promise<string | null> {
+	// 1) Cookie (new + legacy)
+	const cookie = req.headers.get("Cookie") || "";
+	const m = cookie.match(/(?:^|;\s*)(?:__Host-uid|uid)=([A-Za-z0-9-]+)/);
+	if (m) return m[1];
+
+	// 2) Bearer token
+	const auth = req.headers.get("Authorization") || "";
+	const mm = auth.match(/^Bearer\s+(.+)$/i);
+	if (mm) {
+		const parsed = await parseAndVerifySessionToken(mm[1], env.STRAVA_WEBHOOK_VERIFY_TOKEN);
+		if (parsed?.userId) return parsed.userId;
+	}
+	return null;
 }
 
 async function readJson<T>(
@@ -459,12 +501,11 @@ export default {
 		}
 
 		if (url.pathname === "/api/auth/logout" && (request.method === "POST" || request.method === "GET")) {
-			// Clear in the app’s partition via XHR (must include credentials on the client)
 			const headers = new Headers();
-			headers.set("Set-Cookie", "uid=; Path=/; HttpOnly; Secure; SameSite=None; Partitioned; Max-Age=0");
-
-			// Don’t 302 here—return a CORS-able response
-			return withCors(env, request, { status: 204, headers });
+			headers.append("Set-Cookie", "__Host-uid=; Path=/; HttpOnly; Secure; SameSite=None; Partitioned; Max-Age=0");
+			headers.append("Set-Cookie", "uid=; Path=/; HttpOnly; Secure; SameSite=None; Partitioned; Max-Age=0"); // legacy
+			headers.set("Cache-Control", "no-store");
+			return withCors(env, request, { status: 200, headers }, JSON.stringify({ ok: true }));
 		}
 
 		// GET /api/auth/finalize?s=<userId.exp.sig>
@@ -488,13 +529,14 @@ export default {
 			headers.set("Content-Type", "application/json");
 			headers.set("Cache-Control", "no-store");
 
-			// IMPORTANT: status 200 (not 204). iOS Safari is picky here.
-			return withCors(env, request, { status: 200, headers }, JSON.stringify({ ok: true }));
+			const token = await makeSessionToken(userId, env.STRAVA_WEBHOOK_VERIFY_TOKEN);
+
+			return withCors(env, request, { status: 200, headers }, JSON.stringify({ ok: true, token }));
 		}
 
 		// Which athlete is my current session tied to?
 		if (url.pathname === "/api/whoami" && request.method === "GET") {
-			const uid = getUidFromCookie(request.headers.get("Cookie"));
+			const uid = getUserIdFromRequest(request, env);
 			// /api/whoami success path
 			if (!uid) return withCors(env, request, { status: 401 }, "No session");
 			const row = await env.DB.prepare(
@@ -578,7 +620,7 @@ export default {
 
 		// List payouts for the current user — GET /api/payouts?limit=50&offset=0
 		if (url.pathname === "/api/payouts" && request.method === "GET") {
-			const uid = getUidFromCookie(request.headers.get("Cookie"));
+			const uid = getUserIdFromRequest(request, env);
 			if (!uid) return withCors(env, request, { status: 401 }, "No session");
 
 			// simple pagination (sane caps)
@@ -604,7 +646,7 @@ export default {
 		// Lock funds (demo) — POST { cents: number }
 		if (url.pathname === "/api/pool/lock" && request.method === "POST") {
 			const body = await readJson<LockBody>(request, isLockBody);
-			const uid = getUidFromCookie(request.headers.get("Cookie"));
+			const uid = getUserIdFromRequest(request, env);
 			if (!uid) return withCors(env, request, { status: 401 }, "No session");
 
 			await env.DB.batch([
@@ -621,7 +663,7 @@ export default {
 		// Emergency unlock — POST { cents: number } (enforce <= 3)
 		if (url.pathname === "/api/pool/emergency-unlock" && request.method === "POST") {
 			const body = await readJson<EmergencyUnlockBody>(request, isEmergencyUnlockBody);
-			const uid = getUidFromCookie(request.headers.get("Cookie"));
+			const uid = getUserIdFromRequest(request, env);
 			if (!uid) return withCors(env, request, { status: 401 }, "No session");
 
 			const row = await env.DB
@@ -651,17 +693,14 @@ export default {
 
 		// In your fetch handler:
 		if (url.pathname === "/api/me" && request.method === "GET") {
-			const uid = getUidFromCookie(request.headers.get("Cookie"));
+			const uid = await getUserIdFromRequest(request, env);
 			if (!uid) return withCors(env, request, { status: 401 }, "No session");
-
 			const row = await env.DB.prepare(
 				"SELECT cents_locked, emergency_unlocks_used FROM money_pools WHERE user_id = ?"
 			).bind(uid).first<{ cents_locked: number; emergency_unlocks_used: number } | null>();
-
-			return withCors(env, request, {
-				headers: { "Content-Type": "application/json" }
-			}, JSON.stringify(row ?? { cents_locked: 0, emergency_unlocks_used: 0 }));
+			return withCors(env, request, { headers: { "Content-Type": "application/json" } }, JSON.stringify(row ?? { cents_locked: 0, emergency_unlocks_used: 0 }));
 		}
+
 
 		return withCors(env, request, { status: 404 }, "Not found");
 	},
