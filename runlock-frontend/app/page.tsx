@@ -6,6 +6,18 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import ThemeToggle from "@/components/ThemeToggle";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE as string;
 
@@ -60,6 +72,9 @@ export default function Page() {
   const [payoutLoading, setPayoutLoading] = useState(false);
   const [payoutErr, setPayoutErr] = useState<string | null>(null);
   const [payoutOffset, setPayoutOffset] = useState(0);
+  const [unlockDialogOpen, setUnlockDialogOpen] = useState(false);
+  const [unlockSubmitting, setUnlockSubmitting] = useState(false);
+
 
   const emergencyLeft = useMemo(
     () => (me ? Math.max(0, 3 - me.emergency_unlocks_used) : 0),
@@ -145,10 +160,11 @@ export default function Page() {
 
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-6">
-      <header className="flex items-center justify-between">
+      <header className="flex items-center justify-between space-x-2">
         <h1 className="text-2xl font-semibold">RunLock</h1>
         <div className="flex gap-2">
           {/* IMPORTANT: go directly to backend for OAuth start */}
+          <ThemeToggle/>
           <Button asChild variant="default">
             <a href={`${API_BASE}/api/auth/strava/start`}>Connect Strava</a>
           </Button>
@@ -235,15 +251,48 @@ export default function Page() {
                   onChange={(e) => setEmergencyAmount(e.target.value)}
                   placeholder="10"
                 />
-                <Button onClick={emergencyUnlock} disabled={emergencyLeft <= 0}>
-                  Unlock
-                </Button>
+
+                <AlertDialog open={unlockDialogOpen} onOpenChange={setUnlockDialogOpen}>
+                  <AlertDialogTrigger asChild>
+                    <Button disabled={emergencyLeft <= 0}>Unlock</Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent className="rounded-2xl">
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Confirm emergency unlock</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        You’re about to unlock <strong>${(Math.round(parseFloat(emergencyAmount || "0") * 100) / 100).toFixed(2)}</strong> from your pool.
+                        <br />
+                        This uses <strong>1</strong> of your lifetime emergency unlocks
+                        ({emergencyLeft} left){emergencyLeft === 1 ? "" : ""}.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel disabled={unlockSubmitting}>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        disabled={unlockSubmitting}
+                        onClick={async () => {
+                          setUnlockSubmitting(true);
+                          try {
+                            await emergencyUnlock();
+                            setUnlockDialogOpen(false);
+                          } finally {
+                            setUnlockSubmitting(false);
+                          }
+                        }}
+                      >
+                        {unlockSubmitting ? "Unlocking…" : "Yes, unlock"}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               </div>
+
               <p className="text-xs text-muted-foreground">
                 You have <strong>{emergencyLeft}</strong> emergency unlock
                 {emergencyLeft === 1 ? "" : "s"} left.
               </p>
             </div>
+
           </div>
 
           <Separator />
