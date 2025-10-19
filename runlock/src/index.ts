@@ -444,7 +444,7 @@ export default {
 				status: 302,
 				headers: {
 					"Location": env.FRONTEND_URL,
-					"Set-Cookie": `uid=${userId}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=31536000`
+					"Set-Cookie": `uid=${userId}; Path=/; HttpOnly; Secure; SameSite=None; Partitioned; Max-Age=31536000`
 				}
 			});
 		}
@@ -452,7 +452,7 @@ export default {
 		// Which athlete is my current session tied to?
 		if (url.pathname === "/api/whoami" && request.method === "GET") {
 			const uid = getUidFromCookie(request.headers.get("Cookie"));
-			if (!uid) return new Response("No session", { status: 401 });
+			if (!uid) return withCors(env, request, { status: 401 }, "No session");
 			const row = await env.DB.prepare(
 				"SELECT u.id as user_id, u.strava_athlete_id, mp.cents_locked, mp.emergency_unlocks_used FROM users u LEFT JOIN money_pools mp ON mp.user_id=u.id WHERE u.id = ?"
 			).bind(uid).first<{ user_id: string; strava_athlete_id: number; cents_locked: number; emergency_unlocks_used: number } | null>();
@@ -544,12 +544,10 @@ export default {
 			}
 		}
 
-
-
 		// List payouts for the current user — GET /api/payouts?limit=50&offset=0
 		if (url.pathname === "/api/payouts" && request.method === "GET") {
 			const uid = getUidFromCookie(request.headers.get("Cookie"));
-			if (!uid) return new Response("No session", { status: 401 });
+			if (!uid) return withCors(env, request, { status: 401 }, "No session");
 
 			// simple pagination (sane caps)
 			const limit = toPosInt(url.searchParams.get("limit"), 50, 200);
@@ -577,7 +575,7 @@ export default {
 		if (url.pathname === "/api/pool/lock" && request.method === "POST") {
 			const body = await readJson<LockBody>(request, isLockBody);
 			const uid = getUidFromCookie(request.headers.get("Cookie"));
-			if (!uid) return new Response("No session", { status: 401 });
+			if (!uid) return withCors(env, request, { status: 401 }, "No session");
 
 			await env.DB.batch([
 				env.DB.prepare(
@@ -594,7 +592,7 @@ export default {
 		if (url.pathname === "/api/pool/emergency-unlock" && request.method === "POST") {
 			const body = await readJson<EmergencyUnlockBody>(request, isEmergencyUnlockBody);
 			const uid = getUidFromCookie(request.headers.get("Cookie"));
-			if (!uid) return new Response("No session", { status: 401 });
+			if (!uid) return withCors(env, request, { status: 401 }, "No session");
 
 			const row = await env.DB
 				.prepare(
@@ -624,7 +622,7 @@ export default {
 		// In your fetch handler:
 		if (url.pathname === "/api/me" && request.method === "GET") {
 			const uid = getUidFromCookie(request.headers.get("Cookie"));
-			if (!uid) return new Response("No session", { status: 401 });
+			if (!uid) return withCors(env, request, { status: 401 }, "No session");
 
 			const row = await env.DB.prepare(
 				"SELECT cents_locked, emergency_unlocks_used FROM money_pools WHERE user_id = ?"
