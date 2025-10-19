@@ -19,7 +19,7 @@ const nextConfig: NextConfig = {
         'NEXT_PUBLIC_API_BASE must be an absolute URL'
       );
     }
-    console.log(API_BASE)
+    
     return [
       {
         source: `/api/:path*`,
