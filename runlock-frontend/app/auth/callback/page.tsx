@@ -1,29 +1,34 @@
+// app/auth/callback/page.tsx
 "use client";
 
 import { Suspense, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-export const dynamic = "force-dynamic";     // opt out of SSG/ISR for this page
-export const revalidate = 0;                // (belt + suspenders)
-export const viewport = { themeColor: "#ffffff" }; // moved from metadata
+// Do NOT export `revalidate` from a client page.
+// These two are enough to prevent prerender/SSG:
+export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
+
+// If you previously had themeColor in metadata, move it here or to layout:
+export const viewport = { themeColor: "#ffffff" };
 
 function CallbackInner() {
-  const r = useRouter();
+  const router = useRouter();
   const sp = useSearchParams();
 
   useEffect(() => {
     const s = sp.get("s");
-    if (!s) { r.replace("/"); return; }
+    if (!s) { router.replace("/"); return; }
 
     (async () => {
-      // Call your Worker finalize endpoint to set the partitioned cookie
+      // Call Worker finalize to set the Partitioned cookie while top-level = your app
       await fetch(
         `${process.env.NEXT_PUBLIC_API_BASE}/api/auth/finalize?s=${encodeURIComponent(s)}`,
-        { credentials: "include" } // important so cookie is accepted
+        { credentials: "include" } // must include credentials
       );
-      r.replace("/"); // go back to the app after cookie is set
+      router.replace("/");
     })();
-  }, [r, sp]);
+  }, [router, sp]);
 
   return null;
 }
