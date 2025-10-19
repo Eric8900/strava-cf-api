@@ -60,6 +60,7 @@
 		"APP_BASE_URL": "https://runlock.ericchen890.workers.dev",
 		"STRAVA_CLIENT_ID": "181568",
 		"STRAVA_WEBHOOK_VERIFY_TOKEN": "RANDOMSTRING",
+		"FRONTEND_URL": "https://strava-runlock.vercel.app",
 		// Optional fintech demo (Capital One Nessie)
 		"NESSIE_API_BASE": "https://api.nessieisreal.com",
 		"PAYOUT_CAP_CENTS": "500",            // $5/run cap (string OK)

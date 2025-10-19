@@ -226,13 +226,13 @@ export default function Page() {
           <Separator />
 
           {/* tip / global error */}
-          {err ? (
-            <div className="text-sm text-red-600">{err}</div>
-          ) : (
+          {err ? <div className="text-sm text-red-600">
+            Tip: After a Strava run is saved, your pool pays out automatically ($1/mi up to $5).
+          </div> :
             <div className="text-sm text-muted-foreground">
               Tip: After a Strava run is saved, your pool pays out automatically ($1/mi up to $5).
             </div>
-          )}
+          }
 
           {/* --- Recent payouts section --- */}
           <div className="space-y-3">
@@ -254,7 +254,7 @@ export default function Page() {
             </div>
 
             {payoutErr ? (
-              <div className="text-sm text-red-600">{payoutErr}</div>
+              <div className="text-sm text-red-600">No payouts yet.</div>
             ) : payouts.length === 0 && payoutLoading ? (
               <div className="text-sm text-muted-foreground">Loading…</div>
             ) : payouts.length === 0 ? (

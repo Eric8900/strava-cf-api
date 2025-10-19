@@ -6,6 +6,7 @@ export interface Env {
 	STRAVA_CLIENT_SECRET: string;
 	STRAVA_WEBHOOK_VERIFY_TOKEN: string;
 	APP_BASE_URL: string;
+	FRONTEND_URL: string;
 	MY_DURABLE_OBJECT: DurableObjectNamespace;
 }
 
@@ -303,7 +304,7 @@ function dollars(cents: number): string {
 
 const ALLOWED_ORIGINS = new Set([
 	"http://localhost:3000",
-	"https://your-frontend-domain.com", // add prod UI origin
+	"https://strava-runlock.vercel.app", // add prod UI origin
 ]);
 
 function getCorsHeaders(req: Request) {
@@ -440,7 +441,7 @@ export default {
 			return new Response(null, {
 				status: 302,
 				headers: {
-					"Location": "http://localhost:3000",
+					"Location": env.FRONTEND_URL,
 					"Set-Cookie": `uid=${userId}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=31536000`
 				}
 			});
@@ -487,7 +488,7 @@ export default {
 			return new Response("Logged out", {
 				status: 302,
 				headers: {
-					"Location": "http://localhost:3000", // or wherever you want to redirect after logout
+					"Location": env.FRONTEND_URL, // or wherever you want to redirect after logout
 					"Set-Cookie": "uid=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0"
 				}
 			});
