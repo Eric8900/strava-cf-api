@@ -1,7 +1,6 @@
 import type { NextConfig } from "next";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE;
-const FRONTEND_URL = process.env.NEXT_PUBLIC_FRONTEND_URL;
 
 const nextConfig: NextConfig = {
   /* config options here */
@@ -23,7 +22,7 @@ const nextConfig: NextConfig = {
 
     return [
       {
-        source: `${FRONTEND_URL}/api/:path*`,
+        source: `/api/:path*`,
         destination: `${API_BASE}/api/:path*`,
       },
     ];
