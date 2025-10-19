@@ -320,58 +320,46 @@ function normalizeOrigin(s?: string | null): string {
 }
 
 function getAllowedOrigins(env: Env): Set<string> {
-	const set = new Set<string>([
-		"http://localhost:3000",
-	]);
-	const f = normalizeOrigin(env.FRONTEND_URL);
-	if (f) set.add(f);
-	return set;
-}
-
-function isAllowed(env: Env, origin: string): boolean {
-	const o = normalizeOrigin(origin);
-	if (!o) return false;
-	const allowed = getAllowedOrigins(env);
-	if (allowed.has(o)) return true;
-	// allow all vercel preview subdomains for your app (optional)
-	if (o.endsWith(".vercel.app")) return true;
-	return false;
+  return new Set([
+    "http://localhost:3000",
+    env.FRONTEND_URL, // e.g. https://strava-runlock.vercel.app
+  ]);
 }
 
 function getCorsHeaders(env: Env, req: Request): Headers {
-	const h = new Headers();
-	const origin = req.headers.get("Origin") || "";
+  const h = new Headers();
+  const origin = req.headers.get("Origin") || "";
+  const allowed = getAllowedOrigins(env);
 
-	if (isAllowed(env, origin)) {
-		h.set("Access-Control-Allow-Origin", normalizeOrigin(origin));
-		h.set("Access-Control-Allow-Credentials", "true");
-		h.set("Vary", "Origin");
-	}
-	h.set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
-	// keep default, preflight will override with the request's header list
-	h.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
-	h.set("Access-Control-Max-Age", "86400");
-	return h;
+  if (allowed.has(origin)) {
+    h.set("Access-Control-Allow-Origin", origin);
+    h.set("Vary", "Origin");
+    h.set("Access-Control-Allow-Credentials", "true");
+  }
+  h.set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+  h.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  h.set("Access-Control-Max-Age", "86400");
+  return h;
 }
 
 function preflight(env: Env, req: Request): Response {
-	const cors = getCorsHeaders(env, req);
-	if (!cors.get("Access-Control-Allow-Origin")) {
-		// Optional: reject unknown origins
-		return new Response("CORS origin not allowed", { status: 403, headers: cors });
-	}
-	const reqHeaders = req.headers.get("Access-Control-Request-Headers") || "Content-Type";
-	cors.set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
-	cors.set("Access-Control-Allow-Headers", reqHeaders);
-	return new Response(null, { status: 204, headers: cors });
+  const cors = getCorsHeaders(env, req);
+  if (!cors.get("Access-Control-Allow-Origin")) {
+    // Optional: reject unknown origins
+    return new Response("CORS origin not allowed", { status: 403, headers: cors });
+  }
+  const reqHeaders = req.headers.get("Access-Control-Request-Headers") || "Content-Type";
+  cors.set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+  cors.set("Access-Control-Allow-Headers", reqHeaders);
+  return new Response(null, { status: 204, headers: cors });
 }
 
 function withCors(env: Env, req: Request, init: ResponseInit = {}, body?: BodyInit | null): Response {
-	const cors = getCorsHeaders(env, req);
-	const headers = new Headers(init.headers || {});
-	// IMPORTANT: iterate Headers properly
-	for (const [k, v] of cors.entries()) headers.set(k, v);
-	return new Response(body ?? (init as any).body ?? null, { ...init, headers });
+  const cors = getCorsHeaders(env, req);
+  const headers = new Headers(init.headers || {});
+  // IMPORTANT: iterate Headers properly
+  for (const [k, v] of cors.entries()) headers.set(k, v);
+  return new Response(body ?? (init as any).body ?? null, { ...init, headers });
 }
 
 
@@ -385,7 +373,7 @@ export default {
 
 		// Handle CORS preflight first
 		if (request.method === "OPTIONS") {
-			return preflight(env, request);
+			return preflight(request);
 		}
 
 		// Start OAuth with Strava
@@ -610,7 +598,6 @@ export default {
 				.all<DbPayoutRow>();
 
 			return withCors(
-				env,
 				request,
 				{ headers: { "Content-Type": "application/json" } },
 				JSON.stringify({ items: results ?? [], limit, offset })
@@ -633,7 +620,7 @@ export default {
 					"INSERT INTO pool_transactions (id,user_id,type,cents) VALUES (?,?,?,?)"
 				).bind(crypto.randomUUID(), uid, "LOCK", body.cents)
 			]);
-			return withCors(env, request, { status: 200 }, `locked $${dollars(body.cents)}`);
+			return withCors(request, { status: 200 }, `locked $${dollars(body.cents)}`);
 		}
 
 		// Emergency unlock — POST { cents: number } (enforce <= 3)
@@ -664,7 +651,7 @@ export default {
 				).bind(crypto.randomUUID(), uid, "EMERGENCY_UNLOCK", body.cents)
 			]);
 
-			return withCors(env, request, { status: 200 }, `unlocked $${dollars(body.cents)}`);
+			return withCors(request, { status: 200 }, `unlocked $${dollars(body.cents)}`);
 		}
 
 		// In your fetch handler:
@@ -676,12 +663,12 @@ export default {
 				"SELECT cents_locked, emergency_unlocks_used FROM money_pools WHERE user_id = ?"
 			).bind(uid).first<{ cents_locked: number; emergency_unlocks_used: number } | null>();
 
-			return withCors(env, request, {
+			return withCors(request, {
 				headers: { "Content-Type": "application/json" }
 			}, JSON.stringify(row ?? { cents_locked: 0, emergency_unlocks_used: 0 }));
 		}
 
-		return withCors(env, request, { status: 404 }, "Not found");
+		return withCors(request, { status: 404 }, "Not found");
 	},
 	async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
 		ctx.waitUntil(ensureStravaWebhookSubscription(env));
