@@ -67,7 +67,7 @@ export default function Page() {
   const [emergencyAmount, setEmergencyAmount] = useState("10");
 
   // payouts state
-  const PAGE_SIZE = 10;
+  const PAGE_SIZE = 100;
   const [payouts, setPayouts] = useState<Payout[]>([]);
   const [payoutLoading, setPayoutLoading] = useState(false);
   const [payoutErr, setPayoutErr] = useState<string | null>(null);
